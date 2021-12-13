@@ -40,7 +40,7 @@ int main() {
   // Choose a size small enough for there to be space for the two compute kernels on the device at the same time.
   auto const data_size = 10000;
   auto* data = new int[data_size];
-  // streams being a vector is not working
+  // streams being a raw pointer is not working
   // auto const nstreams = 2;
   // auto* streams = new int[nstreams];
   auto const nstreams = 2;
