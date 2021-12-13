@@ -1,10 +1,6 @@
-#ifdef NVHPC_COMPILER
 #include <cuda_profiler_api.h>
-#include "cuda_runtime.h"
-#endif
-#include <iostream>
+
 #include <memory>
-#include <omp.h>
 
 #define stringify(x) #x
 #ifdef _OPENMP
@@ -14,62 +10,52 @@
 #define omp_pragma(x)
 #define acc_pragma(x) _Pragma(stringify(acc x))
 #else
-#define omp_pragma(x)
-#define acc_pragma(x)
+#error "Expected OpenMP or OpenACC to be enabled."
 #endif
 
-void init(int* data, std::size_t data_size) {
+template<typename T>
+void init(int* data, std::size_t data_size, std::array<T,2> streams, int queue = 0) {
   acc_pragma(parallel loop present(data[0:data_size]))
-  omp_pragma(target teams distribute parallel for simd depend(out:data[0:data_size]) nowait)
+  omp_pragma(target teams distribute parallel for simd depend(out: streams[queue]) nowait)
   for(auto i = 0; i < data_size; ++i) {
     data[i] = i;
   }
 }
 
 template<typename T>
-void compute(int* data, std::size_t data_start, std::size_t data_size, std::array< T, 2 > streams, int index) {
-  std::cout << "[compute] : data_start: " << data_start << " data_size: " << data_size << std::endl;
-  acc_pragma(parallel loop present(data[data_start:data_size]) async(streams[index]))
-  omp_pragma(target teams distribute parallel for simd depend(inout:streams[index]) nowait)
-  //omp_pragma(target teams distribute parallel for simd nowait)
+void compute(int* data, std::size_t data_start, std::size_t data_size, std::array<T,2> streams, int queue) {
+//void compute(int* data, std::size_t data_start, std::size_t data_size, T* streams, int queue) {
+  acc_pragma(parallel loop present(data[data_start:data_size]) async(streams[queue]))
+  omp_pragma(target teams distribute parallel for simd depend(inout: streams[queue]) nowait)
   for(auto i = data_start; i < data_start + data_size; ++i) {
-    // for(auto j = 0; j < i*i; ++j) {
-    //   data[i] += j;
-    // }
-    data[i] *= i;
+    for(auto j = 0; j < i*i; ++j) {
+      data[i] += j;
+    }
   }
 }
 
 int main() {
-#ifdef NVHPC_COMPILER
   cudaProfilerStart();
-#endif
   // Choose a size small enough for there to be space for the two compute kernels on the device at the same time.
-  auto const data_size = 1000;
+  auto const data_size = 10000;
   auto* data = new int[data_size];
-  // auto* streams = new int[2];
-  // streams[0] = 1;
-  // streams[1] = 2;
-  //std::array< cudaStream_t, 2 > streams;
+  // streams being a vector is not working
+  // auto const nstreams = 2;
+  // auto* streams = new int[nstreams];
   std::array<int,2> streams;
-  streams[0] = 0; //(cudaStream_t)omp_get_cuda_stream( omp_get_default_device(), true );
-  streams[1] = 1; //(cudaStream_t)omp_get_cuda_stream( omp_get_default_device(), true );
+  streams[0] = 0;
+  streams[1] = 1;
   acc_pragma(data create(data[0:data_size]))
   omp_pragma(target data map(alloc: data[0:data_size]))
   {
-    init(data, data_size);
+    init(data, data_size, streams);
     // Launch 2 kernels that can be run in parallel
     compute(data, 0, data_size/2, streams, 0);
     compute(data, data_size/2, data_size/2, streams, 1);
     acc_pragma(wait async(0))
     acc_pragma(wait async(1))
     omp_pragma(taskwait)
-    for(int i = 0; i < data_size; i++) {
-      std::cout << data[i] << std::endl;
-    }
   }
-#ifdef NVHPC_COMPILER
   cudaProfilerStop();
-#endif
   return 0;
 }
