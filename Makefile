@@ -14,7 +14,7 @@ bin/openmp_example: src/openmp_example.cpp
 
 profiles/%.qdrep: bin/%
 	mkdir -p profiles/
-	nsys profile -o $@ -c cudaProfilerApi --kill=none $^
+	nsys profile -f true -o $@ -c cudaProfilerApi --kill=none $^
 
 .PHONY: clean
 clean:
